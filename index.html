@@ -30,7 +30,6 @@
     min-height: 100vh;
     color: var(--ink);
     overflow-x: hidden;
-    -webkit-user-select: none; user-select: none;
   }
 
   body::before {
@@ -41,11 +40,85 @@
     z-index: 0;
   }
 
+  /* LOCK SCREEN */
+  .lock-screen {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    z-index: 1000;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 40px 24px;
+    gap: 24px;
+  }
+  .lock-screen.hidden { display: none; }
+  .lock-monogram {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 32px;
+    color: var(--ink);
+    text-align: center;
+    border-top: 2px solid var(--line-dark);
+    border-bottom: 0.5px solid var(--line-dark);
+    padding: 14px 24px;
+    position: relative;
+  }
+  .lock-monogram::before {
+    content: '';
+    position: absolute;
+    top: 4px; left: 0; right: 0;
+    height: 0.5px;
+    background: var(--line-dark);
+  }
+  .lock-prompt {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 14px;
+    color: var(--soft);
+    text-align: center;
+  }
+  .lock-input {
+    width: 240px;
+    padding: 14px 18px;
+    border: 0.5px solid var(--line-dark);
+    border-radius: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 18px;
+    color: var(--ink);
+    background: rgba(255,255,255,0.4);
+    text-align: center;
+    letter-spacing: 0.2em;
+    outline: none;
+  }
+  .lock-input:focus { border-width: 1px; border-color: var(--ink); }
+  .lock-btn {
+    background: var(--ink);
+    color: var(--light);
+    border: none;
+    border-radius: 100px;
+    padding: 12px 32px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .lock-error {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: #a04040;
+    height: 18px;
+  }
+
   .app {
     position: relative; z-index: 1;
     max-width: 480px;
     margin: 0 auto;
     padding: 28px 22px 100px;
+    -webkit-user-select: none; user-select: none;
   }
 
   .mast { text-align: center; border-top: 2px solid var(--line-dark); border-bottom: 0.5px solid var(--line-dark); padding: 14px 0; position: relative; }
@@ -124,7 +197,18 @@
 </style>
 </head>
 <body>
-<div class="app">
+
+<!-- LOCK SCREEN -->
+<div class="lock-screen" id="lockScreen">
+  <div class="lock-monogram">Mi agenda personal</div>
+  <div class="lock-prompt"><em>introduce tu contraseña para continuar</em></div>
+  <input type="password" class="lock-input" id="lockInput" placeholder="••••••••" autocomplete="off" />
+  <div class="lock-error" id="lockError"></div>
+  <button class="lock-btn" id="lockBtn">entrar</button>
+</div>
+
+<!-- APP -->
+<div class="app" id="app" style="display:none;">
   <header class="mast">
     <div class="mast-title">Mi agenda personal</div>
   </header>
@@ -146,7 +230,7 @@
   <div id="weekContent"></div>
 </div>
 
-<button class="add-btn" id="addBtn">
+<button class="add-btn" id="addBtn" style="display:none;">
   <span class="plus"></span>
   Nuevo
 </button>
@@ -168,391 +252,438 @@
 <script>
 'use strict';
 
-// ===== Helper functions defined first =====
-function startOfDay(d) { var x = new Date(d); x.setHours(0,0,0,0); return x; }
-function fmtDate(d) {
-  var y = d.getFullYear();
-  var m = String(d.getMonth()+1).padStart(2,'0');
-  var day = String(d.getDate()).padStart(2,'0');
-  return y + '-' + m + '-' + day;
-}
-function isSameDay(a, b) {
-  return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
-}
-function addDays(d, n) {
-  var x = new Date(d);
-  x.setDate(d.getDate() + n);
-  return x;
-}
-function getWeekNumber(d) {
-  var target = new Date(d.valueOf());
-  var dayNr = (d.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3);
-  var firstThursday = target.valueOf();
-  target.setMonth(0, 1);
-  if (target.getDay() !== 4) {
-    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
-  }
-  return 1 + Math.ceil((firstThursday - target) / 604800000);
-}
+// ============================================
+// CONTRASEÑA — para cambiarla, edita esta línea
+// ============================================
+var PASSWORD = '12345678';
+// ============================================
 
-// ===== Data =====
-var SEED = [
-  { id: 'r1',  title: '🏋️ Gym', date: '2026-05-02', done: false },
-  { id: 'r2',  title: '💉 Vacuna alergias', date: '2026-05-08', done: false },
-  { id: 'r3',  title: '💡 EDENORTE', date: '2026-05-10', done: false },
-  { id: 'r4',  title: '💳 TC BHD 5019', date: '2026-05-22', done: false },
-  { id: 'r5',  title: '🧹 Doña Milagros', date: '2026-05-24', done: false },
-  { id: 'r6',  title: '💳 Préstamo Popular', date: '2026-05-25', done: false },
-  { id: 'r7',  title: '💳 TC 0718', date: '2026-05-30', done: false },
-  { id: 'r8',  title: '🏠 Local cocina', date: '2026-05-30', done: false },
-  { id: 'r9',  title: '📋 TSS', date: '2026-05-30', done: false },
-  { id: 'r10', title: '🏋️ Gym', date: '2026-06-01', done: false },
-  { id: 'r11', title: '💳 TC Popular 2538', date: '2026-06-06', done: false },
-  { id: 'r12', title: '💳 TC BHD 8150', date: '2026-06-07', done: false },
-  { id: 'r13', title: '🐾 Pastilla Bethoven', date: '2026-06-10', done: false },
-  { id: 'r14', title: '📦 Pago contenedores', date: '2026-06-13', done: false }
-];
+var SESSION_KEY = 'mi-agenda-unlocked';
 
-var STORAGE_KEY = 'mi-agenda-v3';
-
-function loadFromStorage() {
+function checkUnlocked() {
   try {
-    var raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return null;
+    return sessionStorage.getItem(SESSION_KEY) === '1';
+  } catch (e) { return false; }
 }
 
-function saveToStorage(data) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch (e) {}
+function setUnlocked() {
+  try { sessionStorage.setItem(SESSION_KEY, '1'); } catch (e) {}
 }
 
-var reminders = loadFromStorage() || SEED.slice();
-var TODAY = startOfDay(new Date());
-var weekStart = new Date(TODAY);
-
-var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-var MESES_ABV = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-var DIAS_ABV = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
-
-function isCurrentWeek() {
-  var end = addDays(weekStart, 6);
-  return TODAY >= weekStart && TODAY <= end;
+function showApp() {
+  document.getElementById('lockScreen').classList.add('hidden');
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('addBtn').style.display = 'flex';
+  initApp();
 }
 
-function renderHeader() {
-  var end = addDays(weekStart, 6);
-  document.getElementById('weekNum').textContent = getWeekNumber(weekStart);
-  var sameMonth = weekStart.getMonth() === end.getMonth();
-  var range = sameMonth
-    ? weekStart.getDate() + ' — ' + end.getDate() + ' ' + MESES[weekStart.getMonth()]
-    : weekStart.getDate() + ' ' + MESES_ABV[weekStart.getMonth()] + ' — ' + end.getDate() + ' ' + MESES_ABV[end.getMonth()];
-  document.getElementById('weekRange').textContent = range;
-  document.getElementById('weekYear').textContent = weekStart.getFullYear();
-
-  var total = 0;
-  for (var i = 0; i < 7; i++) {
-    var ds = fmtDate(addDays(weekStart, i));
-    total += reminders.filter(function(r) { return r.date === ds && !r.done; }).length;
-  }
-  document.getElementById('totalNum').textContent = total;
-  document.getElementById('totalLbl').textContent = total === 1 ? 'pendiente esta semana' : 'pendientes esta semana';
-
-  var navCurrent = document.getElementById('navCurrent');
-  if (isCurrentWeek()) {
-    navCurrent.textContent = 'ESTA SEMANA';
-    navCurrent.classList.remove('is-other');
+function tryUnlock() {
+  var input = document.getElementById('lockInput').value;
+  if (input === PASSWORD) {
+    setUnlocked();
+    showApp();
   } else {
-    navCurrent.textContent = MESES[weekStart.getMonth()] + ' ' + weekStart.getFullYear();
-    navCurrent.classList.add('is-other');
+    document.getElementById('lockError').textContent = 'contraseña incorrecta';
+    document.getElementById('lockInput').value = '';
+    setTimeout(function() { document.getElementById('lockError').textContent = ''; }, 2000);
   }
 }
 
-function renderWeek() {
-  var wrap = document.getElementById('weekContent');
-  wrap.innerHTML = '';
+document.getElementById('lockBtn').addEventListener('click', tryUnlock);
+document.getElementById('lockInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') tryUnlock();
+});
 
-  for (var i = 0; i < 7; i++) {
-    (function(i) {
-      var d = addDays(weekStart, i);
-      var ds = fmtDate(d);
-      var items = reminders.filter(function(r) { return r.date === ds; });
-      var isToday = isSameDay(d, TODAY);
+// Auto-unlock if session is still active
+if (checkUnlocked()) {
+  showApp();
+} else {
+  setTimeout(function() { document.getElementById('lockInput').focus(); }, 200);
+}
 
-      var group = document.createElement('div');
-      group.className = 'day-group';
-      group.dataset.date = ds;
+// ============================================
+// APP CODE (only runs after unlock)
+// ============================================
+function initApp() {
+  function startOfDay(d) { var x = new Date(d); x.setHours(0,0,0,0); return x; }
+  function fmtDate(d) {
+    var y = d.getFullYear();
+    var m = String(d.getMonth()+1).padStart(2,'0');
+    var day = String(d.getDate()).padStart(2,'0');
+    return y + '-' + m + '-' + day;
+  }
+  function isSameDay(a, b) {
+    return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+  }
+  function addDays(d, n) {
+    var x = new Date(d);
+    x.setDate(d.getDate() + n);
+    return x;
+  }
+  function getWeekNumber(d) {
+    var target = new Date(d.valueOf());
+    var dayNr = (d.getDay() + 6) % 7;
+    target.setDate(target.getDate() - dayNr + 3);
+    var firstThursday = target.valueOf();
+    target.setMonth(0, 1);
+    if (target.getDay() !== 4) {
+      target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+    }
+    return 1 + Math.ceil((firstThursday - target) / 604800000);
+  }
 
-      var row = document.createElement('div');
-      row.className = 'day-row' + (isToday ? ' today' : '');
+  var SEED = [
+    { id: 'r1',  title: '🏋️ Gym', date: '2026-05-02', done: false },
+    { id: 'r2',  title: '💉 Vacuna alergias', date: '2026-05-08', done: false },
+    { id: 'r3',  title: '💡 EDENORTE', date: '2026-05-10', done: false },
+    { id: 'r4',  title: '💳 TC BHD 5019', date: '2026-05-22', done: false },
+    { id: 'r5',  title: '🧹 Doña Milagros', date: '2026-05-24', done: false },
+    { id: 'r6',  title: '💳 Préstamo Popular', date: '2026-05-25', done: false },
+    { id: 'r7',  title: '💳 TC 0718', date: '2026-05-30', done: false },
+    { id: 'r8',  title: '🏠 Local cocina', date: '2026-05-30', done: false },
+    { id: 'r9',  title: '📋 TSS', date: '2026-05-30', done: false },
+    { id: 'r10', title: '🏋️ Gym', date: '2026-06-01', done: false },
+    { id: 'r11', title: '💳 TC Popular 2538', date: '2026-06-06', done: false },
+    { id: 'r12', title: '💳 TC BHD 8150', date: '2026-06-07', done: false },
+    { id: 'r13', title: '🐾 Pastilla Bethoven', date: '2026-06-10', done: false },
+    { id: 'r14', title: '📦 Pago contenedores', date: '2026-06-13', done: false }
+  ];
 
-      var num = document.createElement('div');
-      num.className = 'day-num';
-      num.textContent = d.getDate();
-      row.appendChild(num);
+  var STORAGE_KEY = 'mi-agenda-v3';
 
-      var lbl = document.createElement('div');
-      lbl.className = 'day-lbl';
-      lbl.textContent = isToday ? 'HOY' : DIAS_ABV[d.getDay()];
-      row.appendChild(lbl);
+  function loadFromStorage() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return null;
+  }
+  function saveToStorage(data) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+  }
 
-      var content = document.createElement('div');
-      content.className = 'day-content';
+  var reminders = loadFromStorage() || SEED.slice();
+  var TODAY = startOfDay(new Date());
+  var weekStart = new Date(TODAY);
 
-      if (items.length === 0) {
-        var empty = document.createElement('div');
-        empty.className = 'item-empty';
-        empty.textContent = '— libre';
-        content.appendChild(empty);
-      } else {
-        items.forEach(function(r) {
-          var item = document.createElement('div');
-          item.className = 'item' + (r.done ? ' done' : '');
-          item.dataset.id = r.id;
+  var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  var MESES_ABV = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  var DIAS_ABV = ['DOM','LUN','MAR','MIE','JUE','VIE','SAB'];
 
-          var check = document.createElement('div');
-          check.className = 'item-check';
-          check.addEventListener('click', function(e) {
-            e.stopPropagation();
-            r.done = !r.done;
-            saveToStorage(reminders);
-            renderAll();
+  function isCurrentWeek() {
+    var end = addDays(weekStart, 6);
+    return TODAY >= weekStart && TODAY <= end;
+  }
+
+  function renderHeader() {
+    var end = addDays(weekStart, 6);
+    document.getElementById('weekNum').textContent = getWeekNumber(weekStart);
+    var sameMonth = weekStart.getMonth() === end.getMonth();
+    var range = sameMonth
+      ? weekStart.getDate() + ' — ' + end.getDate() + ' ' + MESES[weekStart.getMonth()]
+      : weekStart.getDate() + ' ' + MESES_ABV[weekStart.getMonth()] + ' — ' + end.getDate() + ' ' + MESES_ABV[end.getMonth()];
+    document.getElementById('weekRange').textContent = range;
+    document.getElementById('weekYear').textContent = weekStart.getFullYear();
+
+    var total = 0;
+    for (var i = 0; i < 7; i++) {
+      var ds = fmtDate(addDays(weekStart, i));
+      total += reminders.filter(function(r) { return r.date === ds && !r.done; }).length;
+    }
+    document.getElementById('totalNum').textContent = total;
+    document.getElementById('totalLbl').textContent = total === 1 ? 'pendiente esta semana' : 'pendientes esta semana';
+
+    var navCurrent = document.getElementById('navCurrent');
+    if (isCurrentWeek()) {
+      navCurrent.textContent = 'ESTA SEMANA';
+      navCurrent.classList.remove('is-other');
+    } else {
+      navCurrent.textContent = MESES[weekStart.getMonth()] + ' ' + weekStart.getFullYear();
+      navCurrent.classList.add('is-other');
+    }
+  }
+
+  function renderWeek() {
+    var wrap = document.getElementById('weekContent');
+    wrap.innerHTML = '';
+
+    for (var i = 0; i < 7; i++) {
+      (function(i) {
+        var d = addDays(weekStart, i);
+        var ds = fmtDate(d);
+        var items = reminders.filter(function(r) { return r.date === ds; });
+        var isToday = isSameDay(d, TODAY);
+
+        var group = document.createElement('div');
+        group.className = 'day-group';
+        group.dataset.date = ds;
+
+        var row = document.createElement('div');
+        row.className = 'day-row' + (isToday ? ' today' : '');
+
+        var num = document.createElement('div');
+        num.className = 'day-num';
+        num.textContent = d.getDate();
+        row.appendChild(num);
+
+        var lbl = document.createElement('div');
+        lbl.className = 'day-lbl';
+        lbl.textContent = isToday ? 'HOY' : DIAS_ABV[d.getDay()];
+        row.appendChild(lbl);
+
+        var content = document.createElement('div');
+        content.className = 'day-content';
+
+        if (items.length === 0) {
+          var empty = document.createElement('div');
+          empty.className = 'item-empty';
+          empty.textContent = '— libre';
+          content.appendChild(empty);
+        } else {
+          items.forEach(function(r) {
+            var item = document.createElement('div');
+            item.className = 'item' + (r.done ? ' done' : '');
+            item.dataset.id = r.id;
+
+            var check = document.createElement('div');
+            check.className = 'item-check';
+            check.addEventListener('click', function(e) {
+              e.stopPropagation();
+              r.done = !r.done;
+              saveToStorage(reminders);
+              renderAll();
+            });
+            item.appendChild(check);
+
+            var text = document.createElement('div');
+            text.className = 'item-text';
+            text.textContent = r.title;
+            item.appendChild(text);
+
+            var editBtn = document.createElement('button');
+            editBtn.className = 'item-edit';
+            editBtn.textContent = 'editar';
+            editBtn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              openEditModal(r);
+            });
+            item.appendChild(editBtn);
+
+            attachDragHandlers(item, r);
+            content.appendChild(item);
           });
-          item.appendChild(check);
+        }
+        row.appendChild(content);
 
-          var text = document.createElement('div');
-          text.className = 'item-text';
-          text.textContent = r.title;
-          item.appendChild(text);
+        if (items.length > 0) {
+          var cnt = document.createElement('div');
+          cnt.className = 'day-cnt';
+          var pending = items.filter(function(x) { return !x.done; }).length;
+          cnt.textContent = pending;
+          row.appendChild(cnt);
+        }
 
-          var editBtn = document.createElement('button');
-          editBtn.className = 'item-edit';
-          editBtn.textContent = 'editar';
-          editBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            openEditModal(r);
-          });
-          item.appendChild(editBtn);
-
-          attachDragHandlers(item, r);
-          content.appendChild(item);
-        });
-      }
-      row.appendChild(content);
-
-      if (items.length > 0) {
-        var cnt = document.createElement('div');
-        cnt.className = 'day-cnt';
-        var pending = items.filter(function(x) { return !x.done; }).length;
-        cnt.textContent = pending;
-        row.appendChild(cnt);
-      }
-
-      group.appendChild(row);
-      wrap.appendChild(group);
-    })(i);
-  }
-}
-
-function renderAll() {
-  renderHeader();
-  renderWeek();
-}
-
-// ===== Drag handlers =====
-var LONG_PRESS_MS = 380;
-var MOVE_TOLERANCE = 8;
-var pressTimer = null;
-var dragState = null;
-
-function attachDragHandlers(item, reminder) {
-  var startX = 0, startY = 0;
-  var pressed = false;
-  var moved = false;
-
-  function onDown(e) {
-    if (e.target.closest('.item-check') || e.target.closest('.item-edit')) return;
-    pressed = true;
-    moved = false;
-    var pt = (e.touches && e.touches[0]) || e;
-    startX = pt.clientX;
-    startY = pt.clientY;
-    pressTimer = setTimeout(function() {
-      if (!pressed || moved) return;
-      if (navigator.vibrate) navigator.vibrate(30);
-      beginDrag(item, reminder, startX, startY);
-    }, LONG_PRESS_MS);
+        group.appendChild(row);
+        wrap.appendChild(group);
+      })(i);
+    }
   }
 
-  function onMove(e) {
-    if (!pressed) return;
-    var pt = (e.touches && e.touches[0]) || e;
-    var dx = pt.clientX - startX;
-    var dy = pt.clientY - startY;
-    if (!dragState && (Math.abs(dx) > MOVE_TOLERANCE || Math.abs(dy) > MOVE_TOLERANCE)) {
-      moved = true;
+  function renderAll() {
+    renderHeader();
+    renderWeek();
+  }
+
+  var LONG_PRESS_MS = 380;
+  var MOVE_TOLERANCE = 8;
+  var pressTimer = null;
+  var dragState = null;
+
+  function attachDragHandlers(item, reminder) {
+    var startX = 0, startY = 0;
+    var pressed = false;
+    var moved = false;
+
+    function onDown(e) {
+      if (e.target.closest('.item-check') || e.target.closest('.item-edit')) return;
+      pressed = true;
+      moved = false;
+      var pt = (e.touches && e.touches[0]) || e;
+      startX = pt.clientX;
+      startY = pt.clientY;
+      pressTimer = setTimeout(function() {
+        if (!pressed || moved) return;
+        if (navigator.vibrate) navigator.vibrate(30);
+        beginDrag(item, reminder, startX, startY);
+      }, LONG_PRESS_MS);
+    }
+
+    function onMove(e) {
+      if (!pressed) return;
+      var pt = (e.touches && e.touches[0]) || e;
+      var dx = pt.clientX - startX;
+      var dy = pt.clientY - startY;
+      if (!dragState && (Math.abs(dx) > MOVE_TOLERANCE || Math.abs(dy) > MOVE_TOLERANCE)) {
+        moved = true;
+        clearTimeout(pressTimer);
+      }
+    }
+
+    function onUp() {
+      pressed = false;
       clearTimeout(pressTimer);
     }
+
+    item.addEventListener('touchstart', onDown, { passive: true });
+    item.addEventListener('touchmove', onMove, { passive: true });
+    item.addEventListener('touchend', onUp);
+    item.addEventListener('touchcancel', function() { pressed = false; clearTimeout(pressTimer); });
+    item.addEventListener('mousedown', onDown);
+    item.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   }
 
-  function onUp() {
-    pressed = false;
-    clearTimeout(pressTimer);
+  function beginDrag(item, reminder, startX, startY) {
+    var rect = item.getBoundingClientRect();
+    var ghost = document.createElement('div');
+    ghost.className = 'ghost';
+    ghost.textContent = reminder.title;
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    document.body.appendChild(ghost);
+    item.classList.add('dragging-source');
+    dragState = {
+      reminder: reminder,
+      sourceItem: item,
+      ghost: ghost,
+      offsetX: startX - rect.left,
+      offsetY: startY - rect.top,
+      currentTarget: null
+    };
+    moveGhost(startX, startY);
+    document.addEventListener('touchmove', onDragMove, { passive: false });
+    document.addEventListener('touchend', onDragEnd);
+    document.addEventListener('touchcancel', onDragEnd);
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', onDragEnd);
   }
 
-  item.addEventListener('touchstart', onDown, { passive: true });
-  item.addEventListener('touchmove', onMove, { passive: true });
-  item.addEventListener('touchend', onUp);
-  item.addEventListener('touchcancel', function() { pressed = false; clearTimeout(pressTimer); });
-  item.addEventListener('mousedown', onDown);
-  item.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-}
-
-function beginDrag(item, reminder, startX, startY) {
-  var rect = item.getBoundingClientRect();
-  var ghost = document.createElement('div');
-  ghost.className = 'ghost';
-  ghost.textContent = reminder.title;
-  ghost.style.left = rect.left + 'px';
-  ghost.style.top = rect.top + 'px';
-  document.body.appendChild(ghost);
-  item.classList.add('dragging-source');
-  dragState = {
-    reminder: reminder,
-    sourceItem: item,
-    ghost: ghost,
-    offsetX: startX - rect.left,
-    offsetY: startY - rect.top,
-    currentTarget: null
-  };
-  moveGhost(startX, startY);
-  document.addEventListener('touchmove', onDragMove, { passive: false });
-  document.addEventListener('touchend', onDragEnd);
-  document.addEventListener('touchcancel', onDragEnd);
-  document.addEventListener('mousemove', onDragMove);
-  document.addEventListener('mouseup', onDragEnd);
-}
-
-function moveGhost(x, y) {
-  if (!dragState) return;
-  var g = dragState.ghost;
-  g.style.left = (x - dragState.offsetX) + 'px';
-  g.style.top = (y - dragState.offsetY) + 'px';
-}
-
-function onDragMove(e) {
-  if (!dragState) return;
-  if (e.cancelable) e.preventDefault();
-  var pt = (e.touches && e.touches[0]) || e;
-  moveGhost(pt.clientX, pt.clientY);
-  dragState.ghost.style.display = 'none';
-  var el = document.elementFromPoint(pt.clientX, pt.clientY);
-  dragState.ghost.style.display = '';
-  var group = el ? el.closest('.day-group') : null;
-  if (group !== dragState.currentTarget) {
-    if (dragState.currentTarget) dragState.currentTarget.classList.remove('drop-target');
-    if (group) group.classList.add('drop-target');
-    dragState.currentTarget = group;
+  function moveGhost(x, y) {
+    if (!dragState) return;
+    var g = dragState.ghost;
+    g.style.left = (x - dragState.offsetX) + 'px';
+    g.style.top = (y - dragState.offsetY) + 'px';
   }
-  var margin = 80;
-  var vh = window.innerHeight;
-  if (pt.clientY < margin) window.scrollBy(0, -8);
-  else if (pt.clientY > vh - margin) window.scrollBy(0, 8);
-}
 
-function onDragEnd() {
-  if (!dragState) return;
-  document.removeEventListener('touchmove', onDragMove);
-  document.removeEventListener('touchend', onDragEnd);
-  document.removeEventListener('touchcancel', onDragEnd);
-  document.removeEventListener('mousemove', onDragMove);
-  document.removeEventListener('mouseup', onDragEnd);
-  var target = dragState.currentTarget;
-  var reminder = dragState.reminder;
-  if (target) {
-    var newDate = target.dataset.date;
-    if (newDate && newDate !== reminder.date) {
-      reminder.date = newDate;
-      if (navigator.vibrate) navigator.vibrate([20, 40, 20]);
-      saveToStorage(reminders);
+  function onDragMove(e) {
+    if (!dragState) return;
+    if (e.cancelable) e.preventDefault();
+    var pt = (e.touches && e.touches[0]) || e;
+    moveGhost(pt.clientX, pt.clientY);
+    dragState.ghost.style.display = 'none';
+    var el = document.elementFromPoint(pt.clientX, pt.clientY);
+    dragState.ghost.style.display = '';
+    var group = el ? el.closest('.day-group') : null;
+    if (group !== dragState.currentTarget) {
+      if (dragState.currentTarget) dragState.currentTarget.classList.remove('drop-target');
+      if (group) group.classList.add('drop-target');
+      dragState.currentTarget = group;
     }
-    target.classList.remove('drop-target');
+    var margin = 80;
+    var vh = window.innerHeight;
+    if (pt.clientY < margin) window.scrollBy(0, -8);
+    else if (pt.clientY > vh - margin) window.scrollBy(0, 8);
   }
-  dragState.ghost.remove();
-  dragState.sourceItem.classList.remove('dragging-source');
-  dragState = null;
-  renderAll();
-}
 
-// ===== Modal =====
-var modalBg = document.getElementById('modalBg');
-var editingId = null;
-
-function openNewModal() {
-  editingId = null;
-  document.getElementById('modalTitle').textContent = 'Nuevo recordatorio';
-  document.getElementById('newTitle').value = '';
-  document.getElementById('newDate').value = fmtDate(weekStart);
-  document.getElementById('deleteBtn').style.display = 'none';
-  modalBg.classList.add('show');
-  setTimeout(function() { document.getElementById('newTitle').focus(); }, 150);
-}
-
-function openEditModal(reminder) {
-  editingId = reminder.id;
-  document.getElementById('modalTitle').textContent = 'Editar recordatorio';
-  document.getElementById('newTitle').value = reminder.title;
-  document.getElementById('newDate').value = reminder.date;
-  document.getElementById('deleteBtn').style.display = 'block';
-  modalBg.classList.add('show');
-}
-
-document.getElementById('addBtn').addEventListener('click', openNewModal);
-document.getElementById('cancelBtn').addEventListener('click', function() { modalBg.classList.remove('show'); });
-modalBg.addEventListener('click', function(e) { if (e.target === modalBg) modalBg.classList.remove('show'); });
-
-document.getElementById('saveBtn').addEventListener('click', function() {
-  var title = document.getElementById('newTitle').value.trim();
-  var date = document.getElementById('newDate').value;
-  if (!title || !date) return;
-  if (editingId) {
-    var r = reminders.find(function(x) { return x.id === editingId; });
-    if (r) { r.title = title; r.date = date; }
-  } else {
-    reminders.push({ id: 'n' + Date.now(), title: title, date: date, done: false });
+  function onDragEnd() {
+    if (!dragState) return;
+    document.removeEventListener('touchmove', onDragMove);
+    document.removeEventListener('touchend', onDragEnd);
+    document.removeEventListener('touchcancel', onDragEnd);
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('mouseup', onDragEnd);
+    var target = dragState.currentTarget;
+    var reminder = dragState.reminder;
+    if (target) {
+      var newDate = target.dataset.date;
+      if (newDate && newDate !== reminder.date) {
+        reminder.date = newDate;
+        if (navigator.vibrate) navigator.vibrate([20, 40, 20]);
+        saveToStorage(reminders);
+      }
+      target.classList.remove('drop-target');
+    }
+    dragState.ghost.remove();
+    dragState.sourceItem.classList.remove('dragging-source');
+    dragState = null;
+    renderAll();
   }
-  saveToStorage(reminders);
-  modalBg.classList.remove('show');
-  weekStart = startOfDay(new Date(date + 'T00:00:00'));
-  renderAll();
-});
 
-document.getElementById('deleteBtn').addEventListener('click', function() {
-  if (!editingId) return;
-  if (!confirm('¿Eliminar este recordatorio?')) return;
-  reminders = reminders.filter(function(r) { return r.id !== editingId; });
-  saveToStorage(reminders);
-  modalBg.classList.remove('show');
-  renderAll();
-});
+  var modalBg = document.getElementById('modalBg');
+  var editingId = null;
 
-document.getElementById('prevBtn').addEventListener('click', function() {
-  weekStart = addDays(weekStart, -7);
-  renderAll();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-});
+  function openNewModal() {
+    editingId = null;
+    document.getElementById('modalTitle').textContent = 'Nuevo recordatorio';
+    document.getElementById('newTitle').value = '';
+    document.getElementById('newDate').value = fmtDate(weekStart);
+    document.getElementById('deleteBtn').style.display = 'none';
+    modalBg.classList.add('show');
+    setTimeout(function() { document.getElementById('newTitle').focus(); }, 150);
+  }
 
-document.getElementById('nextBtn').addEventListener('click', function() {
-  weekStart = addDays(weekStart, 7);
-  renderAll();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-});
+  function openEditModal(reminder) {
+    editingId = reminder.id;
+    document.getElementById('modalTitle').textContent = 'Editar recordatorio';
+    document.getElementById('newTitle').value = reminder.title;
+    document.getElementById('newDate').value = reminder.date;
+    document.getElementById('deleteBtn').style.display = 'block';
+    modalBg.classList.add('show');
+  }
 
-renderAll();
+  document.getElementById('addBtn').addEventListener('click', openNewModal);
+  document.getElementById('cancelBtn').addEventListener('click', function() { modalBg.classList.remove('show'); });
+  modalBg.addEventListener('click', function(e) { if (e.target === modalBg) modalBg.classList.remove('show'); });
+
+  document.getElementById('saveBtn').addEventListener('click', function() {
+    var title = document.getElementById('newTitle').value.trim();
+    var date = document.getElementById('newDate').value;
+    if (!title || !date) return;
+    if (editingId) {
+      var r = reminders.find(function(x) { return x.id === editingId; });
+      if (r) { r.title = title; r.date = date; }
+    } else {
+      reminders.push({ id: 'n' + Date.now(), title: title, date: date, done: false });
+    }
+    saveToStorage(reminders);
+    modalBg.classList.remove('show');
+    weekStart = startOfDay(new Date(date + 'T00:00:00'));
+    renderAll();
+  });
+
+  document.getElementById('deleteBtn').addEventListener('click', function() {
+    if (!editingId) return;
+    if (!confirm('¿Eliminar este recordatorio?')) return;
+    reminders = reminders.filter(function(r) { return r.id !== editingId; });
+    saveToStorage(reminders);
+    modalBg.classList.remove('show');
+    renderAll();
+  });
+
+  document.getElementById('prevBtn').addEventListener('click', function() {
+    weekStart = addDays(weekStart, -7);
+    renderAll();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  document.getElementById('nextBtn').addEventListener('click', function() {
+    weekStart = addDays(weekStart, 7);
+    renderAll();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  renderAll();
+}
 </script>
 </body>
 </html>
